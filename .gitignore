@@ -1,0 +1,64 @@
+# ============================================================
+# Tracking Certificate - .gitignore
+# ============================================================
+
+# --- Python -------------------------------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# --- Ambiente virtual ---------------------------------------
+venv/
+.venv/
+env/
+
+# --- Dados e configuração locais do app (NÃO versionar) -----
+# Banco SQLite: histórico de envios, Risk Assessment, certificados recebidos
+tracking.db
+*.db
+*.sqlite
+*.sqlite3
+# Configuração do usuário (caminhos, e-mail do remetente/BCC, pasta de certificados)
+tracking_config.json
+# Logs
+tracking_app_log.txt
+tracking_auto_log.txt
+*.log
+# Nomes antigos (versões anteriores do app)
+renovacert_*
+
+# --- Dados corporativos / sensíveis -------------------------
+# Banco Access com e-mails dos fornecedores (teste ou produção)
+*.accdb
+*.mdb
+# Exportações do SRM e planilhas de trabalho
+*.xlsx
+*.xls
+*.csv
+# Pasta de certificados recebidos / anexos do Risk Assessment
+certificados/
+certificates/
+Certificates/
+
+# --- Empacotamento (PyInstaller) ----------------------------
+build/
+dist/
+# O arquivo "Tracking Certificate.spec" é código de build e PODE ser versionado.
+# Para ignorá-lo também, descomente a linha abaixo:
+# *.spec
+
+# --- Editores / sistema -------------------------------------
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Segredos -----------------------------------------------
+.env
+*.pem
+*.key
