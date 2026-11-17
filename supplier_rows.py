@@ -93,18 +93,39 @@ def env_valid(sup):
     return sup.env_expiry is not None and compute_status(sup.env_expiry)[0] != EXPIRED
 
 
-def load_received(rdb, suppliers):
-    """Lê os certificados 'recebidos, ainda não subidos'. Quando o Excel passa
-    a mostrar o certificado como válido, o registro é encerrado (o dado já
-    chegou ao datalake) e os lembretes voltam a valer normalmente."""
-    received = rdb.suppressed_groups()
-    for sup in suppliers:
-        if (sup.rbsno, "quality") in received and quality_valid(sup):
-            rdb.delete_group(sup.rbsno, "quality")
-            received.discard((sup.rbsno, "quality"))
-        if (sup.rbsno, "env") in received and env_valid(sup):
-            rdb.delete_group(sup.rbsno, "env")
-            received.discard((sup.rbsno, "env"))
+def cert_key(certificate):
+    c = certificate or ""
+    if "IATF" in c:
+        return "iatf"
+    if "14001" in c or "Environ" in c:
+        return "env"
+    return "iso"
+
+
+def load_received(rdb, suppliers, folder=""):
+    """Devolve o conjunto de (rbsno, chave) dos certificados recebidos
+    manualmente, com chave "iso", "iatf" ou "env". Registros cujo arquivo
+    sumiu da pasta são apagados. Quando o Excel passa a mostrar o certificado
+    como válido, o registro é encerrado (o dado já chegou ao datalake)."""
+    rdb.prune_missing_files()
+    by_rbs = {s.rbsno: s for s in suppliers}
+    received = set()
+    for rbsno, certificate in rdb.all_certs():
+        key = cert_key(certificate)
+        sup = by_rbs.get(rbsno)
+        real = None
+        if sup is not None:
+            real = {"iso": sup.iso_expiry, "iatf": sup.iatf_expiry, "env": sup.env_expiry}[key]
+        if real is not None and compute_status(real)[0] != EXPIRED:
+            rdb.delete_cert(rbsno, certificate)
+        else:
+            received.add((rbsno, key))
+    # arquivos já existentes nas pastas dos fornecedores também contam
+    if folder:
+        import cert_files
+        for sup in suppliers:
+            for key in cert_files.scan_keys(folder, sup.name, sup.rbsno):
+                received.add((sup.rbsno, key))
     return received
 
 
@@ -125,8 +146,11 @@ def build_rows(sup, email, hdb, overdue_days, received=frozenset(), risk=frozens
 
     # --- Ambiental (ISO 14001): totalmente independente --------------------
     env_tier, env_days = _status(sup.env_expiry)
+    env_rec = (sup.rbsno, "env") in received
+    if env_rec:
+        env_tier, env_days = None, None
     env_pending = False
-    if sup.env_expiry is not None and env_tier is not None:
+    if not env_rec and sup.env_expiry is not None and env_tier is not None:
         env_pending = needs_notification(hdb, sup.rbsno, "env_expiry", sup.env_expiry, env_tier, overdue_days)
     rows.append({
         "tab": "env_expiry", "field": "env_expiry", "kind": "normal",
@@ -137,14 +161,20 @@ def build_rows(sup, email, hdb, overdue_days, received=frozenset(), risk=frozens
     # --- ISO 9001 x IATF 16949: substituição cruzada ------------------------
     iso_tier, iso_days = _status(sup.iso_expiry)
     iatf_tier, iatf_days = _status(sup.iatf_expiry)
-    iso_valid = sup.iso_expiry is not None and iso_tier != EXPIRED
-    iatf_valid = sup.iatf_expiry is not None and iatf_tier != EXPIRED
+    iso_rec = (sup.rbsno, "iso") in received
+    iatf_rec = (sup.rbsno, "iatf") in received
+    if iso_rec:
+        iso_tier, iso_days = None, None
+    if iatf_rec:
+        iatf_tier, iatf_days = None, None
+    iso_valid = iso_rec or (sup.iso_expiry is not None and iso_tier != EXPIRED)
+    iatf_valid = iatf_rec or (sup.iatf_expiry is not None and iatf_tier != EXPIRED)
 
     # um certificado ATIVO (mais de 90 dias) repõe o outro: se o outro está
     # expirando/vencido/em branco, a linha fica azul e conta como Ativo
     if iso_tier is None or (iso_valid and iatf_tier is not None):
         iso_pending = False
-        if iso_tier is not None:
+        if iso_tier is not None and not iso_rec:
             iso_pending = needs_notification(hdb, sup.rbsno, "iso_expiry", sup.iso_expiry, iso_tier, overdue_days)
         row_iso = {
             "tab": "iso_expiry", "field": "iso_expiry", "kind": "normal",
@@ -171,7 +201,7 @@ def build_rows(sup, email, hdb, overdue_days, received=frozenset(), risk=frozens
 
     if iatf_tier is None or (iatf_valid and iso_tier is not None):
         iatf_pending = False
-        if iatf_tier is not None:
+        if iatf_tier is not None and not iatf_rec:
             iatf_pending = needs_notification(hdb, sup.rbsno, "iatf_expiry", sup.iatf_expiry, iatf_tier, overdue_days)
         row_iatf = {
             "tab": "iatf_expiry", "field": "iatf_expiry", "kind": "normal",
@@ -203,13 +233,14 @@ def build_rows(sup, email, hdb, overdue_days, received=frozenset(), risk=frozens
         # ISO e IATF ambos em branco: o e-mail pergunta se o fornecedor possui
         # o certificado (a Ambiental em branco NUNCA gera e-mail)
         r["notify"] = (r["tier"] in (EXPIRED, NO_DATE)) if r["field"] == COMBINED_FIELD else (r["tier"] not in (None, NO_DATE, BLUE))
-        grp = "env" if r["tab"] == "env_expiry" else "quality"
-        if r["notify"] and (sup.rbsno, grp) in received:
-            # certificado já recebido (ainda não subido): suspende a cobrança
+        own = {"env_expiry": env_rec, "iso_expiry": iso_rec, "iatf_expiry": iatf_rec}[r["tab"]]
+        if own and r["kind"] == "normal":
+            # certificado recebido manualmente (ainda não subido): conta como ATIVO
             r["received"] = True
+            r["kind"] = "received"
             r["pending"] = False
             r["shown_pending"] = False
-        elif r["notify"] and grp == "quality" and (sup.rbsno in risk or (sup.name or "").lower() in risk):
+        elif r["notify"] and r["tab"] != "env_expiry" and (sup.rbsno in risk or (sup.name or "").lower() in risk):
             # fornecedor já em Risk Assessment: não cobrar mais por e-mail
             r["risk"] = True
             r["pending"] = False

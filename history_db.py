@@ -3,6 +3,12 @@
 Histórico de envios, guardado localmente em SQLite (nada a configurar).
 Usado para saber o que já foi enviado, para nunca disparar o mesmo aviso
 duas vezes na mesma faixa.
+
+Observação: este schema/nome de arquivo ('tracking.db') é o atual.
+Se você está migrando de uma versão antiga com schema em português, o
+arquivo antigo (ex.: 'renovacert_historico.db') não é apagado, mas também
+não é migrado - a primeira execução após a migração pode reenviar avisos de
+uma faixa que já tinha sido notificada no sistema antigo.
 """
 import sqlite3
 from datetime import date, datetime

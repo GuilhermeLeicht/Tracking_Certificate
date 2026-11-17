@@ -31,14 +31,34 @@ class ReceivedDB:
         self.conn.close()
 
     def add(self, rbsno, pmd, name, certificate, file_name, saved_path):
+        # mesmo arquivo (mesmo caminho/nome) registrado de novo: substitui o registro
+        self.conn.execute("DELETE FROM received_certs WHERE saved_path=?", (saved_path,))
         self.conn.execute(
             "INSERT INTO received_certs (rbsno, pmd, supplier_name, certificate, grp, file_name, "
             "saved_path, received_date) VALUES (?,?,?,?,?,?,?,?)",
             (rbsno, pmd, name, certificate, group_of(certificate), file_name, saved_path, str(date.today())))
         self.conn.commit()
 
+    def prune_missing_files(self):
+        """Remove os registros cujo arquivo não existe mais na pasta."""
+        import os
+        removed = 0
+        for rid, path in self.conn.execute("SELECT id, saved_path FROM received_certs").fetchall():
+            if not path or not os.path.isfile(path):
+                self.conn.execute("DELETE FROM received_certs WHERE id=?", (rid,))
+                removed += 1
+        self.conn.commit()
+        return removed
+
     def suppressed_groups(self):
         return {(r[0], r[1]) for r in self.conn.execute("SELECT DISTINCT rbsno, grp FROM received_certs")}
+
+    def all_certs(self):
+        return self.conn.execute("SELECT DISTINCT rbsno, certificate FROM received_certs").fetchall()
+
+    def delete_cert(self, rbsno, certificate):
+        self.conn.execute("DELETE FROM received_certs WHERE rbsno=? AND certificate=?", (rbsno, certificate))
+        self.conn.commit()
 
     def delete_group(self, rbsno, grp):
         self.conn.execute("DELETE FROM received_certs WHERE rbsno=? AND grp=?", (rbsno, grp))

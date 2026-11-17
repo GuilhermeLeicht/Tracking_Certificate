@@ -25,6 +25,10 @@ QWidget {{
     font-size: 10.5pt;
 }}
 
+QLabel, QCheckBox, QRadioButton {{
+    background: transparent;
+}}
+
 QMainWindow {{
     background-color: {LIGHT_BG};
 }}

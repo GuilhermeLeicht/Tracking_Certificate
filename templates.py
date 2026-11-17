@@ -54,7 +54,7 @@ def _body_en(supplier_name, cert_type_label, expiry_date_str, days_left, tier, c
               </p>
             </div>
             <p style="color:#333333; font-size:15px; line-height:1.5;">
-              If you have any questions, please contact our Supplier Quality team.
+              If you have any questions, please contact the responsible buyer.
             </p>
             <p style="color:#333333; font-size:15px; line-height:1.5;">
               Kind regards,<br>Supplier Quality Team
@@ -111,7 +111,7 @@ def _body_missing_pt(supplier_name, cert_type_label, company_name):
               </p>
             </div>
             <p style="color:#333333; font-size:15px; line-height:1.5;">
-              Em caso de dúvidas, entre em contato com nossa equipe de Qualidade de Fornecedores.
+              Em caso de dúvidas, entre em contato com o comprador responsável.
             </p>
             <p style="color:#333333; font-size:15px; line-height:1.5;">
               Atenciosamente,<br>Equipe de Qualidade de Fornecedores
@@ -179,7 +179,7 @@ def _body_pt(supplier_name, cert_type_label, expiry_date_str, days_left, tier, c
               </p>
             </div>
             <p style="color:#333333; font-size:15px; line-height:1.5;">
-              Em caso de dúvidas, entre em contato com nossa equipe de Qualidade de Fornecedores.
+              Em caso de dúvidas, entre em contato com o comprador responsável.
             </p>
             <p style="color:#333333; font-size:15px; line-height:1.5;">
               Atenciosamente,<br>Equipe de Qualidade de Fornecedores

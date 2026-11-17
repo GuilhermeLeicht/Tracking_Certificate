@@ -11,7 +11,7 @@ from PySide6.QtGui import QColor, QBrush, QPainter, QPen, QFont
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QFrame, QPushButton,
     QTableWidget, QHeaderView, QLineEdit, QComboBox, QDialog, QFormLayout,
-    QMessageBox, QScrollArea, QSizePolicy, QFileDialog, QListWidget, QCompleter,
+    QMessageBox, QScrollArea, QSizePolicy, QFileDialog, QListWidget, QCompleter, QInputDialog,
 )
 
 import cert_files
@@ -27,19 +27,26 @@ from ui.common import SortItem, numeric_or_text_key
 
 RISK_CERTS = ["ISO 9001", "IATF 16949", "ISO 9001 or IATF 16949"]
 RISK_STATUSES = ["Open", "In progress", "Completed"]
-RISK_HEADERS = ["Supplier", "RBSNO", "PMD", "Certificate", "Status", "Added", "Files", "Notes"]
+RISK_HEADERS = ["Supplier", "RBSNO", "PMD", "Certificate", "Status", "Added", "Certificate files", "Evidence", "Notes"]
 STATUS_COLORS = {"Open": "#fff3cd", "In progress": "#d6e4ff", "Completed": "#d9f2df"}
 
 
 # --------------------------------------------------------------------------- Risk Assessment
 
+def _is_link(text):
+    return (text or "").lower().startswith(("http://", "https://"))
+
+
 class RiskDialog(QDialog):
     def __init__(self, parent, suppliers, record=None):
         super().__init__(parent)
         self.setWindowTitle("Edit supplier" if record else "Add supplier")
-        self.resize(520, 430)
-        self.existing = []   # caminhos já salvos
-        self.new_files = []  # arquivos escolhidos agora (copiados ao salvar)
+        self.resize(560, 600)
+        self.existing = []   # certificados já salvos (caminhos)
+        self.new_files = []  # certificados escolhidos agora (copiados ao salvar)
+        self.removed = []    # arquivos removidos da lista (apagados da pasta só ao salvar)
+        self.ev_existing = []  # evidências já salvas (caminhos ou links)
+        self.ev_new = []       # evidências novas: arquivos (copiados ao salvar) ou links
         self.suppliers = {s.name: s for s in suppliers}
 
         form = QFormLayout(self)
@@ -68,9 +75,9 @@ class RiskDialog(QDialog):
 
         self.file_list = QListWidget()
         self.file_list.setFixedHeight(80)
-        form.addRow("Attachments:", self.file_list)
+        form.addRow("Certificate:", self.file_list)
         frow = QHBoxLayout()
-        b_add = QPushButton("Attach files...")
+        b_add = QPushButton("Attach certificate...")
         b_add.setObjectName("SecondaryButton")
         b_add.clicked.connect(self._attach)
         b_rm = QPushButton("Remove selected")
@@ -80,6 +87,25 @@ class RiskDialog(QDialog):
         frow.addWidget(b_rm)
         frow.addStretch()
         form.addRow("", frow)
+
+        self.ev_list = QListWidget()
+        self.ev_list.setFixedHeight(110)
+        self.ev_list.itemDoubleClicked.connect(self._open_evidence)
+        form.addRow("Evidence:", self.ev_list)
+        erow = QHBoxLayout()
+        e_file = QPushButton("Add files...")
+        e_file.setObjectName("SecondaryButton")
+        e_file.clicked.connect(self._ev_attach)
+        e_link = QPushButton("Add link...")
+        e_link.setObjectName("SecondaryButton")
+        e_link.clicked.connect(self._ev_link)
+        e_rm = QPushButton("Remove selected")
+        e_rm.setObjectName("SecondaryButton")
+        e_rm.clicked.connect(self._ev_detach)
+        for b in (e_file, e_link, e_rm):
+            erow.addWidget(b)
+        erow.addStretch()
+        form.addRow("", erow)
 
         row = QHBoxLayout()
         row.addStretch()
@@ -93,8 +119,9 @@ class RiskDialog(QDialog):
         form.addRow(row)
 
         if record:
-            _id, rbsno, pmd, name, cert, status, _added, notes, files = record
+            _id, rbsno, pmd, name, cert, status, _added, notes, files, evidence = record
             self.existing = [f for f in (files or "").split("|") if f]
+            self.ev_existing = [f for f in (evidence or "").split("|") if f]
             self.name.setCurrentText(name or "")
             self.rbsno.setText(rbsno or "")
             self.pmd.setText(pmd or "")
@@ -109,6 +136,11 @@ class RiskDialog(QDialog):
             self.file_list.addItem(os.path.basename(f))
         for f in self.new_files:
             self.file_list.addItem(os.path.basename(f) + "  (new)")
+        self.ev_list.clear()
+        for f in self.ev_existing:
+            self.ev_list.addItem(f if _is_link(f) else os.path.basename(f))
+        for f in self.ev_new:
+            self.ev_list.addItem((f if _is_link(f) else os.path.basename(f)) + "  (new)")
 
     def _attach(self):
         paths, _ = QFileDialog.getOpenFileNames(self, "Attach files")
@@ -120,10 +152,47 @@ class RiskDialog(QDialog):
         if i < 0:
             return
         if i < len(self.existing):
-            del self.existing[i]  # só remove a referência; o arquivo continua na pasta
+            # sai da lista agora; o arquivo só é apagado da pasta ao clicar em Save
+            self.removed.append(self.existing.pop(i))
         else:
             del self.new_files[i - len(self.existing)]
         self._refresh_files()
+
+    def _ev_attach(self):
+        paths, _ = QFileDialog.getOpenFileNames(self, "Add evidence files")
+        self.ev_new.extend(paths)
+        self._refresh_files()
+
+    def _ev_link(self):
+        url, ok = QInputDialog.getText(self, "Add link", "Link (URL):")
+        url = url.strip()
+        if ok and url:
+            if not url.lower().startswith(("http://", "https://")):
+                url = "https://" + url
+            self.ev_new.append(url)
+            self._refresh_files()
+
+    def _ev_detach(self):
+        i = self.ev_list.currentRow()
+        if i < 0:
+            return
+        if i < len(self.ev_existing):
+            item = self.ev_existing.pop(i)
+            if not _is_link(item):
+                self.removed.append(item)
+        else:
+            del self.ev_new[i - len(self.ev_existing)]
+        self._refresh_files()
+
+    def _open_evidence(self, _item):
+        i = self.ev_list.currentRow()
+        items = self.ev_existing + self.ev_new
+        if 0 <= i < len(items):
+            target = items[i]
+            if _is_link(target):
+                QDesktopServices.openUrl(QUrl(target))
+            elif os.path.exists(target):
+                QDesktopServices.openUrl(QUrl.fromLocalFile(target))
 
     def _autofill(self, text):
         sup = self.suppliers.get(text)
@@ -142,7 +211,7 @@ class RiskDialog(QDialog):
                 self.cert.currentText(), self.status.currentText(), self.notes.text().strip())
 
     def file_state(self):
-        return self.existing, self.new_files
+        return self.existing, self.new_files, self.ev_existing, self.ev_new, self.removed
 
 
 class RiskAssessmentPage(QWidget):
@@ -193,8 +262,8 @@ class RiskAssessmentPage(QWidget):
         self.table.doubleClicked.connect(lambda _i: self.edit())
         h = self.table.horizontalHeader()
         h.setSectionResizeMode(0, QHeaderView.Stretch)
-        h.setSectionResizeMode(7, QHeaderView.Stretch)
-        for c in (1, 2, 3, 4, 5, 6):
+        h.setSectionResizeMode(8, QHeaderView.Stretch)
+        for c in (1, 2, 3, 4, 5, 6, 7):
             h.setSectionResizeMode(c, QHeaderView.ResizeToContents)
         layout.addWidget(self.table, stretch=1)
 
@@ -230,7 +299,7 @@ class RiskAssessmentPage(QWidget):
         self.table.setSortingEnabled(False)
         self.table.setRowCount(0)
         for rec in records:
-            rec_id, rbsno, pmd, name, certificate, st, added, notes, files = rec
+            rec_id, rbsno, pmd, name, certificate, st, added, notes, files, evidence = rec
             if q and q not in (name or "").lower() and q not in (rbsno or "").lower():
                 continue
             if not cert.endswith("All") and certificate != cert:
@@ -247,11 +316,13 @@ class RiskAssessmentPage(QWidget):
                 SortItem(added or ""),
                 SortItem(str(len([f for f in (files or "").split("|") if f])),
                          len([f for f in (files or "").split("|") if f])),
+                SortItem(str(len([f for f in (evidence or "").split("|") if f])),
+                         len([f for f in (evidence or "").split("|") if f])),
                 SortItem(notes or ""),
             ]
             cells[0].setData(Qt.UserRole, rec_id)
             for c, cell in enumerate(cells):
-                if c in (1, 2, 3, 4, 5, 6):
+                if c in (1, 2, 3, 4, 5, 6, 7):
                     cell.setTextAlignment(Qt.AlignCenter)
                 if c == 4:
                     cell.setBackground(QBrush(QColor(STATUS_COLORS.get(st, "#ffffff"))))
@@ -266,29 +337,51 @@ class RiskAssessmentPage(QWidget):
             return None
         return self.table.item(rows[0].row(), 0).data(Qt.UserRole)
 
-    def _store_files(self, values, existing, new_files):
-        """Copia os anexos novos para a pasta do fornecedor e devolve a lista final."""
-        paths = list(existing)
-        if new_files:
+    def _store_files(self, values, existing, new_files, ev_existing, ev_new, removed):
+        """Copia os arquivos novos para a pasta do fornecedor (certificados na
+        raiz, evidências na subpasta "Evidence"; links ficam só no banco) e
+        devolve (certificados, evidências)."""
+        paths, ev = list(existing), list(ev_existing)
+        new_ev_files = [e for e in ev_new if not _is_link(e)]
+        if new_files or new_ev_files:
             base = self._folder()
             if not base:
                 QMessageBox.warning(self, "Risk Assessment",
                                     "Set the certificates folder in Settings to save attachments.")
                 return None
             for src in new_files:
-                paths.append(cert_files.save_file(base, values[2], values[0], src))
-        return "|".join(paths)
+                # certificado: renomeado igual ao "Register Received Certificate"
+                # (<Certificado> - <Fornecedor> - <RBSNO>.<ext>), para o status ser reconhecido
+                paths.append(cert_files.save_file(base, values[2], values[0], src, values[3]))
+        # certificados já anexados antes com outro nome: padroniza também
+        paths = [cert_files.standardize_existing(p, values[2], values[0], values[3]) for p in paths]
+        paths = list(dict.fromkeys(paths))
+        for e in ev_new:
+            ev.append(e if _is_link(e) else cert_files.save_extra(self._folder(), values[2], values[0], e, "Evidence"))
+        return "|".join(paths), "|".join(ev)
+
+    def _delete_removed(self, removed):
+        """Apaga da pasta os arquivos que o usuário removeu e confirmou com Save."""
+        for path in removed:
+            try:
+                if os.path.isfile(path):
+                    os.remove(path)
+                    self._log(f"Risk Assessment: file deleted from folder: {path}")
+            except OSError as exc:
+                self._log(f"ERROR deleting {path}: {exc}")
 
     def add(self):
         dlg = RiskDialog(self, self._suppliers())
         if dlg.exec():
             v = dlg.values()
-            files = self._store_files(v, *dlg.file_state())
-            if files is None:
+            state = dlg.file_state()
+            stored = self._store_files(v, *state)
+            if stored is None:
                 return
             db = self._db()
-            db.add(*v, files=files)
+            db.add(*v, files=stored[0], evidence=stored[1])
             db.close()
+            self._delete_removed(state[4])
             self._log(f"Risk Assessment: added {v[2] or v[0]}.")
             self.refresh()
             self._on_change()
@@ -305,12 +398,14 @@ class RiskAssessmentPage(QWidget):
         dlg = RiskDialog(self, self._suppliers(), record)
         if dlg.exec():
             v = dlg.values()
-            files = self._store_files(v, *dlg.file_state())
-            if files is None:
+            state = dlg.file_state()
+            stored = self._store_files(v, *state)
+            if stored is None:
                 return
             db = self._db()
-            db.update(rec_id, *v, files=files)
+            db.update(rec_id, *v, files=stored[0], evidence=stored[1])
             db.close()
+            self._delete_removed(state[4])
             self._log(f"Risk Assessment: edited {v[2] or v[0]}.")
             self.refresh()
             self._on_change()
@@ -446,7 +541,7 @@ class ReceivedCertDialog(QDialog):
                                 "Set the certificates folder in Settings (Certificate Files) first.")
             return
         try:
-            dest = cert_files.save_file(self.folder, sup.name, sup.rbsno, self.src)
+            dest = cert_files.save_file(self.folder, sup.name, sup.rbsno, self.src, self.cert.currentText())
             db = ReceivedDB(self.db_path)
             db.add(sup.rbsno, sup.pmd, sup.name, self.cert.currentText(), os.path.basename(dest), dest)
             db.close()
@@ -587,7 +682,12 @@ class ReportsPage(QWidget):
         self.note = QLabel("Load and analyze the SRM Excel file in the Panel to see the charts.")
         self.note.setObjectName("SectionHint")
         self.note.setWordWrap(True)
-        lay.addWidget(self.note)
+        self.time_saved_label = QLabel("Time Saved: 0.00 hours")
+        self.time_saved_label.setObjectName("TimeSavedLabel")
+        note_row = QHBoxLayout()
+        note_row.addWidget(self.note, stretch=1)
+        note_row.addWidget(self.time_saved_label, alignment=Qt.AlignRight | Qt.AlignTop)
+        lay.addLayout(note_row)
 
         row = QHBoxLayout()
         row.setSpacing(14)

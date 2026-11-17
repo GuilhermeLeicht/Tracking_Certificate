@@ -291,6 +291,7 @@ class MainWindow(QMainWindow):
             if "certificates_folder" in self.settings_fields else self.cfg.get("certificates_folder", ""),
             on_change=self._refresh_follow)
         self.reports_tab = ReportsPage()
+        self.time_saved_label = self.reports_tab.time_saved_label
 
         self.stack = QStackedWidget()
         self.nav_pages = ["panel", "risk", "reports", "history", "log", "settings"]
@@ -369,6 +370,8 @@ class MainWindow(QMainWindow):
 
     def _navigate(self, key):
         self.stack.setCurrentIndex(self.nav_pages.index(key))
+        if key in ("reports", "history") and hasattr(self, "history_table"):
+            self._refresh_history()
         self.nav_buttons[key].setChecked(True)
 
     def _toggle_sidebar(self):
@@ -454,6 +457,16 @@ class MainWindow(QMainWindow):
             table = self._build_cert_table()
             self.sub_tabs.addTab(table, label)
             self.tables[field] = table
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("Search supplier, RBSNO or PMD...")
+        self.search_edit.setClearButtonEnabled(True)
+        self.search_edit.setFixedWidth(300)
+        self.search_edit.textChanged.connect(self._apply_search)
+        search_box = QWidget()
+        sb = QHBoxLayout(search_box)
+        sb.setContentsMargins(0, 0, 0, 4)
+        sb.addWidget(self.search_edit)
+        self.sub_tabs.setCornerWidget(search_box, Qt.TopRightCorner)
         layout.addWidget(self.sub_tabs, stretch=1)
 
         bottom_bar = QHBoxLayout()
@@ -469,6 +482,15 @@ class MainWindow(QMainWindow):
         layout.addLayout(bottom_bar)
 
         return widget
+
+    def _apply_search(self, *_):
+        """Filtra as linhas das 3 tabelas por Supplier, RBSNO ou PMD."""
+        text = self.search_edit.text().strip().lower()
+        for table in self.tables.values():
+            for r in range(table.rowCount()):
+                cells = [table.item(r, c) for c in (0, 1, 2)]
+                hay = " ".join((i.text() if i else "").lower() for i in cells)
+                table.setRowHidden(r, bool(text) and text not in hay)
 
     def _build_cert_table(self):
         table = QTableWidget(0, len(TABLE_HEADERS))
@@ -507,10 +529,6 @@ class MainWindow(QMainWindow):
         self.history_total_label = QLabel("0 total sends")
         self.history_total_label.setObjectName("PendingCounter")
         top.addWidget(self.history_total_label)
-        self.time_saved_label = QLabel("Time Saved: 0.00 hours")
-        self.time_saved_label.setObjectName("TimeSavedLabel")
-        top.addSpacing(14)
-        top.addWidget(self.time_saved_label)
         layout.addLayout(top)
 
         headers = ["RBSNO", "PMD", "Supplier", "Certificate", "Expiry Date", "Tier", "Sent Date", "E-mail"]
@@ -543,6 +561,7 @@ class MainWindow(QMainWindow):
                     self.history_table.setItem(r, c, SortItem(str(val or "")))
             total_sends = hdb.count()
             self.history_total_label.setText(f"{total_sends} total sends")
+            self.history_total_label.setContentsMargins(0, 0, 0, 0)
             hours = (total_sends * 5) / 60
             self.time_saved_label.setText(f"Time Saved: {hours:.2f} hours")
             hdb.close()
@@ -727,15 +746,16 @@ class MainWindow(QMainWindow):
         if path:
             line_edit.setText(path)
 
+    def _certs_folder(self):
+        f = self.settings_fields.get("certificates_folder") if hasattr(self, "settings_fields") else None
+        return f.text().strip() if f is not None else self.cfg.get("certificates_folder", "")
+
     def _refresh_follow(self):
         """Gráfico 'Follow-up': Risk Assessment x arquivos recebidos x sem data."""
         try:
             rdb = RiskDB(self.cfg["history_db_path"])
-            risk = len({r[1] or r[3] for r in rdb.all()})
+            risk = len({r[1] or r[3] for r in rdb.all() if r[5] != "Completed"})
             rdb.close()
-            fdb = ReceivedDB(self.cfg["history_db_path"])
-            files = fdb.supplier_count()
-            fdb.close()
         except Exception as exc:
             self._log(f"ERROR reading follow-up counts: {exc}")
             return
@@ -743,7 +763,9 @@ class MainWindow(QMainWindow):
         # Risk Assessment e sem arquivo recebido)
         missing_total = sum(1 for r in self.status_rows
                             if r["tab"] == "iso_expiry" and r["field"] == COMBINED_FIELD and r["tier"] == NO_DATE)
-        missing = max(0, missing_total - risk - files)
+        files = len({r["rbsno"] for r in self.status_rows
+                     if r["tab"] in ("iso_expiry", "iatf_expiry") and r.get("received")})
+        missing = max(0, missing_total - risk)
         self.reports_tab.set_follow({"risk": risk, "files": files, "missing": missing})
 
     def _register_received(self):
@@ -878,7 +900,7 @@ class MainWindow(QMainWindow):
 
             hdb = HistoryDB(self.cfg["history_db_path"])
             rdb = ReceivedDB(self.cfg["history_db_path"])
-            received = supplier_rows.load_received(rdb, suppliers)
+            received = supplier_rows.load_received(rdb, suppliers, self._certs_folder())
             rdb.close()
             kdb = RiskDB(self.cfg["history_db_path"])
             risk = kdb.keys()
@@ -931,7 +953,15 @@ class MainWindow(QMainWindow):
             kind = item.get("kind", "normal")
             is_blue = kind in ("blue_iso", "blue_iatf")
 
-            if is_blue:
+            if kind == "received":
+                # certificado recebido manualmente: conta como Ativo
+                field_totals["active"] += 1
+                color = ROW_COLORS["active"]
+                status_text = "Active"
+                expiry_text = "-"
+                sort_rank = 2
+                sort_days = 0
+            elif is_blue:
                 # fornecedor em dia graças ao OUTRO certificado (ISO <-> IATF)
                 field_totals["active"] += 1
                 color = ROW_COLORS["blue"]
@@ -1018,6 +1048,7 @@ class MainWindow(QMainWindow):
             self.tables[field].setSortingEnabled(True)
 
         self.pending_label.setText(f"{total_pending} pending")
+        self._apply_search()
 
         # atualiza os 4 cartões com os números do tipo de certificado
         # atualmente selecionado na sub-aba
@@ -1026,7 +1057,7 @@ class MainWindow(QMainWindow):
         counts = {f: {} for f, _l in CERT_TYPES}
         for item in rows:
             kind = item.get("kind", "normal")
-            if kind in ("blue_iso", "blue_iatf"):
+            if kind in ("blue_iso", "blue_iatf", "received"):
                 cat = "active"  # em dia pelo outro certificado = Ativo
             elif item["tier"] == NO_DATE:
                 cat = "missing"

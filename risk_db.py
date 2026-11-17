@@ -16,11 +16,12 @@ CREATE TABLE IF NOT EXISTS risk_assessment (
     status TEXT,
     added_date TEXT,
     notes TEXT,
-    files TEXT
+    files TEXT,
+    evidence TEXT
 );
 """
 
-COLUMNS = "id, rbsno, pmd, supplier_name, certificate, status, added_date, notes, files"
+COLUMNS = "id, rbsno, pmd, supplier_name, certificate, status, added_date, notes, files, evidence"
 
 
 class RiskDB:
@@ -30,6 +31,8 @@ class RiskDB:
         cols = [r[1] for r in self.conn.execute("PRAGMA table_info(risk_assessment)")]
         if "files" not in cols:  # migração de bancos criados antes dos anexos
             self.conn.execute("ALTER TABLE risk_assessment ADD COLUMN files TEXT")
+        if "evidence" not in cols:  # evidências (arquivos e links)
+            self.conn.execute("ALTER TABLE risk_assessment ADD COLUMN evidence TEXT")
         self.conn.commit()
 
     def close(self):
@@ -39,26 +42,29 @@ class RiskDB:
         return self.conn.execute(f"SELECT {COLUMNS} FROM risk_assessment ORDER BY id DESC").fetchall()
 
     def keys(self):
-        """RBSNOs e nomes (minúsculos) dos fornecedores em Risk Assessment."""
+        """RBSNOs e nomes (minúsculos) dos fornecedores com Risk Assessment
+        EM ABERTO (Open / In progress). Os concluídos (Completed) ficam só
+        no histórico e não pausam mais a cobrança."""
         out = set()
-        for rbsno, name in self.conn.execute("SELECT rbsno, supplier_name FROM risk_assessment"):
+        for rbsno, name in self.conn.execute(
+                "SELECT rbsno, supplier_name FROM risk_assessment WHERE COALESCE(status,'') <> 'Completed'"):
             if rbsno:
                 out.add(rbsno.strip())
             if name:
                 out.add(name.strip().lower())
         return out
 
-    def add(self, rbsno, pmd, name, certificate, status, notes, files=""):
+    def add(self, rbsno, pmd, name, certificate, status, notes, files="", evidence=""):
         self.conn.execute(
-            "INSERT INTO risk_assessment (rbsno, pmd, supplier_name, certificate, status, added_date, notes, files) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (rbsno, pmd, name, certificate, status, str(date.today()), notes, files))
+            "INSERT INTO risk_assessment (rbsno, pmd, supplier_name, certificate, status, added_date, notes, files, evidence) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (rbsno, pmd, name, certificate, status, str(date.today()), notes, files, evidence))
         self.conn.commit()
 
-    def update(self, rec_id, rbsno, pmd, name, certificate, status, notes, files=""):
+    def update(self, rec_id, rbsno, pmd, name, certificate, status, notes, files="", evidence=""):
         self.conn.execute(
-            "UPDATE risk_assessment SET rbsno=?, pmd=?, supplier_name=?, certificate=?, status=?, notes=?, files=? "
-            "WHERE id=?", (rbsno, pmd, name, certificate, status, notes, files, rec_id))
+            "UPDATE risk_assessment SET rbsno=?, pmd=?, supplier_name=?, certificate=?, status=?, notes=?, files=?, evidence=? "
+            "WHERE id=?", (rbsno, pmd, name, certificate, status, notes, files, evidence, rec_id))
         self.conn.commit()
 
     def delete(self, rec_id):

@@ -3,9 +3,9 @@
 Tracking Certificate - Ponto de entrada.
 
 Lê a exportação do Excel do SRM, calcula quais fornecedores estão a 90/60/30
-dias do vencimento dos certificados (ISO 9001 e Ambiental) ou já vencidos, e
-envia e-mails de aviso automaticamente via Outlook (em português para
-fornecedores brasileiros, em inglês para os demais).
+dias do vencimento dos certificados (ISO 9001, IATF 16949 e Ambiental) ou já
+vencidos, e envia e-mails de aviso via Outlook (somente a fornecedores
+brasileiros, sempre em português).
 
 Execução normal (abre a interface gráfica):
     python main.py

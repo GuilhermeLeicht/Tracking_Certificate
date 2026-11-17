@@ -102,7 +102,7 @@ def run_automatic():
     risk = kdb.keys()
     kdb.close()
     rdb = ReceivedDB(cfg["history_db_path"])
-    received = load_received(rdb, suppliers)
+    received = load_received(rdb, suppliers, cfg.get("certificates_folder", ""))
     rdb.close()
     sent, failed, skipped = 0, 0, 0
     for sup in suppliers:

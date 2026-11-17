@@ -2,4 +2,4 @@ PySide6==6.7.2
 openpyxl>=3.1
 pyodbc>=5.0
 pywin32>=306
-plyer>=2.1.1
+plyer>=2.1.0
