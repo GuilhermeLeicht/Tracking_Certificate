@@ -5,10 +5,18 @@ As configurações são salvas em 'tracking_config.json', ao lado do app.
 """
 import json
 import os
+import sys
 
-CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tracking_config.json")
+# Pasta onde ficam config, banco e logs: ao lado do .exe quando empacotado
+# (PyInstaller), ou ao lado do código quando roda com "python main.py".
+if getattr(sys, "frozen", False):
+    APP_DIR = os.path.dirname(sys.executable)
+else:
+    APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
-_BASE = os.path.dirname(os.path.abspath(__file__))
+CONFIG_FILE = os.path.join(APP_DIR, "tracking_config.json")
+
+_BASE = APP_DIR
 
 
 def _migrate_legacy_files():
@@ -56,7 +64,7 @@ DEFAULT_CONFIG = {
     "access_col_email": "Emails Concatenados",
 
     # Histórico de envios interno (SQLite, nada a configurar)
-    "history_db_path": os.path.join(os.path.dirname(os.path.abspath(__file__)), "tracking.db"),
+    "history_db_path": os.path.join(APP_DIR, "tracking.db"),
 
     # Regras de notificação
     "reminder_days": [90, 60, 30],

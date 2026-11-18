@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS notifications (
 class HistoryDB:
     def __init__(self, path):
         self.path = path
-        self.conn = sqlite3.connect(path)
+        self.conn = sqlite3.connect(path, timeout=30)  # timeout: vários PCs no mesmo arquivo
         self.conn.execute(SCHEMA)
         self.conn.commit()
 

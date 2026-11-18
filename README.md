@@ -114,8 +114,32 @@ usado como está no campo *Para* do Outlook.
 ### 3.3 Certificate Files
 
 **Folder for certificate files:** pasta-base onde ficam os certificados
-recebidos e os anexos do Risk Assessment. O app cria automaticamente uma
-subpasta por fornecedor no formato `Nome do fornecedor - RBSNO`.
+recebidos e os arquivos do Risk Assessment. O app cria automaticamente uma
+subpasta por fornecedor no formato `Nome do fornecedor - RBSNO`. As evidências
+do Risk Assessment ficam na subpasta `Evidence` dentro dela.
+
+**Nomes dos certificados:** todo certificado anexado (pelo Register ou pelo Risk
+Assessment) é renomeado para `<Certificado> - <Fornecedor> - <RBSNO>.<ext>`
+(ex.: `IATF 16949 - ZFR COM PERFILADOS LTDA - 97942806.pdf`; prefixos `ISO 9001`,
+`IATF 16949` e `ISO 14001`). **O app reconhece o certificado pelo nome do
+arquivo**, então não renomeie nem mova esses arquivos.
+
+### 3.3.1 Shared Database (banco compartilhado)
+
+**Database file (tracking.db):** local do arquivo do banco (histórico de envios,
+Risk Assessment e certificados recebidos). Use o botão **...** para selecionar um
+`.db` existente ou escolher onde ele será criado (se o arquivo não existir, é
+criado vazio no local indicado).
+
+**Para vários PCs usarem os mesmos dados:** em **cada PC**, aponte esta opção
+para o **mesmo arquivo** em uma pasta de rede (ex.: `\\servidor\qualidade\tracking.db`).
+A configuração é gravada por PC (`tracking_config.json`), então é preciso
+informá-la uma vez em cada máquina. Para migrar dados já existentes, copie o
+`tracking.db` atual para o local compartilhado **antes** de apontar os PCs para
+ele. Ao salvar, o app valida a pasta (precisa existir e ser acessível) e cria as
+tabelas se o banco for novo. Evite que dois PCs enviem os lembretes ao mesmo
+tempo (o histórico é gravado a cada envio, mas dois envios simultâneos podem
+duplicar e-mails).
 
 ### 3.4 Notification Rules
 
@@ -166,10 +190,13 @@ mostra só os ícones. Ordem: **Panel, Risk Assessment, Reports** no topo e
 
 ### 5.1 Panel
 
-- **Select SRM Excel File / Load & Analyze:** escolhe e processa o Excel.
+- **Select SRM Excel File / Load & Analyze:** escolhe e processa o Excel (o último
+  arquivo escolhido é lembrado).
 - **Register Received Certificate:** ver 5.2.
 - **4 cartões** (Suppliers, Active, Expiring, Expired) que mostram os números
   **da sub-aba selecionada**.
+- **Campo de pesquisa** (canto direito, acima da tabela): filtra as 3 abas por
+  **Supplier, RBSNO ou PMD** enquanto você digita.
 - **Sub-abas** ISO 9001 (Quality), Environmental (ISO 14001), IATF 16949 (Quality).
   Cada tabela tem as colunas: Supplier, RBSNO, PMD, Expiry Date, Status,
   Reminder, E-mail. Clique no cabeçalho para ordenar (clicar de novo inverte).
@@ -182,7 +209,7 @@ mostra só os ícones. Ordem: **Panel, Risk Assessment, Reports** no topo e
 
 | Cor | Situação |
 |---|---|
-| Verde | Ativo (mais de 90 dias) |
+| Verde | Ativo (mais de 90 dias) ou certificado recebido manualmente |
 | Amarelo | Expirando (faixa 90/60/30) |
 | Vermelho | Vencido |
 | Cinza | Missing date (sem data) |
@@ -190,7 +217,7 @@ mostra só os ícones. Ordem: **Panel, Risk Assessment, Reports** no topo e
 | Roxo | Fornecedor em **Risk Assessment** |
 
 **Coluna Reminder:** `Pending` (será enviado), `Sent` (já enviado nesta faixa),
-`Received` (certificado recebido, cobrança pausada), `-` (nada a fazer).
+`Received` (certificado recebido manualmente, conta como Ativo), `-` (nada a fazer).
 
 ### 5.2 Register Received Certificate
 
@@ -203,15 +230,28 @@ carregado no datalake — evita cobrar em duplicidade.
 3. Informe **qual certificado** está anexando (ISO 9001, IATF 16949 ou
    Environmental).
 4. Anexe o **arquivo (obrigatório)**.
-5. **Save:** o arquivo é copiado para `<pasta>/<Fornecedor> - <RBSNO>/` (a pasta
-   é criada se não existir; nunca sobrescreve — se o nome repetir, acrescenta
-   data/hora) e o app reanalisa.
+5. **Save:** o arquivo é copiado para `<pasta>/<Fornecedor> - <RBSNO>/` (criada
+   se não existir) e **renomeado** para `<Certificado> - <Fornecedor> - <RBSNO>.<ext>`
+   (ex.: `ISO 9001 - Hidro Jet - 902193213.pdf`, independentemente do nome
+   original). Registrar de novo o mesmo certificado do mesmo fornecedor
+   **substitui** o arquivo e o registro anteriores. O app reanalisa em seguida.
 
-Efeito: a linha passa a `Received` e deixa de ser cobrada. Registrar ISO 9001
-**ou** IATF 16949 pausa a cobrança dos dois (um substitui o outro); registrar
-Environmental pausa só o ambiental. Quando o Excel passar a mostrar o
-certificado como **válido**, o registro é encerrado automaticamente e o
-fornecedor volta ao fluxo normal.
+Efeito: o certificado passa a contar como **Ativo** (linha verde, Status "Active",
+Reminder `Received`) e deixa de ser cobrado. Registrar o **ISO 9001** faz a aba
+IATF 16949 ficar azul ("Supplier ISO"), e registrar o **IATF 16949** faz a aba
+ISO 9001 ficar azul ("Supplier IATF"). Registrar o Environmental afeta só o
+ambiental.
+
+**Como o app confere:** a cada **Load & Analyze** (e no `--auto`) ele
+1. apaga os registros cujo arquivo **não existe mais** na pasta (arquivo
+   apagado = fornecedor volta ao status real);
+2. também reconhece arquivos colocados na pasta do fornecedor com os nomes
+   acima, mesmo sem passar pelo botão;
+3. encerra o registro de um certificado quando o Excel passa a mostrá-lo
+   **válido** (a data da planilha volta a valer).
+
+O app **não lê a data de validade do arquivo**: o certificado fica Ativo
+enquanto o arquivo existir (apague-o quando o certificado vencer).
 
 > Requer a pasta configurada em **Settings → Certificate Files**.
 
@@ -222,14 +262,30 @@ Lista de fornecedores que **não possuem o certificado** e exigem ação em camp
 - **Add / Edit / Remove** (Edit também por duplo clique).
 - No cadastro: nome (dropdown com os fornecedores analisados — preenche RBSNO
   e PMD), certificado faltante, **status** (Open / In progress / Completed),
-  observações e **anexos** (ficam na pasta do fornecedor).
+  observações e dois campos de arquivos:
+  - **Certificate:** o certificado do fornecedor. É renomeado no padrão
+    `<Certificado> - <Fornecedor> - <RBSNO>.<ext>` e funciona como o Register
+    (o fornecedor passa a Ativo no próximo Load & Analyze). Para "ISO 9001 or
+    IATF 16949" o nome usa o prefixo ISO 9001 — se o arquivo for o IATF, escolha
+    "IATF 16949" no campo antes de salvar.
+  - **Evidence:** evidências do assessment — **arquivos** (copiados para a
+    subpasta `Evidence`, com o nome original) e/ou **links** (hiperlinks; duplo
+    clique abre o arquivo ou o link).
+- **Remove selected** (em Certificate ou Evidence) tira o item da lista; o
+  arquivo só é **apagado da pasta ao clicar em Save** (Cancel não apaga nada).
+- **Histórico:** abrir um novo Risk Assessment para o mesmo fornecedor e
+  certificado cria **outro registro**; os anteriores (inclusive Completed) são
+  mantidos. Arquivos de evidência com nome repetido recebem data/hora, sem
+  sobrescrever.
 - **Busca** por nome ou RBSNO e **filtros** por certificado e status; todas as
   colunas ordenam ao clicar no cabeçalho.
 - **Open folder** abre a pasta do fornecedor.
 
-Efeito no Panel: o fornecedor fica **roxo**, com status **Risk Assessment**, e
-**não recebe mais e-mails de cobrança** de ISO 9001/IATF 16949 (qualquer que
-seja o status do Risk Assessment).
+Efeito no Panel: enquanto houver Risk Assessment **em aberto** (Open ou In
+progress), o fornecedor fica **roxo**, com status **Risk Assessment**, e **não
+recebe e-mails de cobrança** de ISO 9001/IATF 16949. Um Risk Assessment
+**Completed** fica só no histórico: não pausa a cobrança e não entra na
+contagem do Follow-up.
 
 ### 5.4 Reports
 
@@ -239,15 +295,17 @@ seja o status do Risk Assessment).
 - **Comparison by certificate:** barras de Quality x Environmental.
 - **Follow-up:** quantos fornecedores estão em **Risk Assessment**, quantos
   tiveram **arquivo adicionado manualmente** e quantos estão em
-  **Missing date (Quality)**. *Missing date = total sem data − Risk Assessment
-  − arquivos recebidos.*
+  **Missing date (Quality)**. *Missing date = total sem data (sem os já
+  recebidos) − Risk Assessment em aberto.*
+- **Time Saved** (selo verde, canto superior direito): cada e-mail enviado = 5
+  minutos economizados, exibido em horas.
 
 ### 5.5 Send History
 
 Todos os e-mails já enviados (RBSNO, PMD, fornecedor, certificado, validade,
 faixa, data, destinatário), com botão **Refresh**, o contador **total de
-envios** e o selo verde **Time Saved** (cada envio = 5 minutos economizados,
-exibido em horas; ex.: 20 envios = 1,67 h).
+envios** (à direita, rente à tabela). O **Time Saved** fica na aba Reports
+(cada envio = 5 minutos; ex.: 20 envios = 1,67 h).
 
 ### 5.6 Log
 
@@ -301,14 +359,17 @@ da aba IATF só espelha o status), para nunca duplicar a cobrança.
 
 ### 6.4 Prioridade entre estados especiais
 
-`Received` (arquivo recebido) tem prioridade sobre `Risk Assessment`. Ambos
-pausam a cobrança de ISO 9001/IATF 16949 (Risk Assessment não afeta o Ambiental).
+Certificado **recebido** (arquivo na pasta) tem prioridade sobre `Risk Assessment`:
+a linha vira Ativa/`Received`. Risk Assessment **em aberto** pausa a cobrança de
+ISO 9001/IATF 16949 (não afeta o Ambiental); concluído, não pausa.
 
 ## 7. E-mails enviados
 
 Sempre em **português**, HTML com identidade azul, assinatura "Equipe de
 Qualidade de Fornecedores". Assunto:
-`<prefixo> - <tag do certificado> - <nome do fornecedor>`, com a tag em
+`<prefixo> - <tag do certificado> - <RBSNO do fornecedor>` (ex.: `Renovação de
+Certificado - Ação Necessária - ISO 9001 / IATF 16949 - 9092345`; o RBSNO no fim
+permite automações futuras), com a tag em
 `ISO 9001`, `ISO 14001`, `IATF 16949` ou `ISO 9001 / IATF 16949`.
 
 ### 7.1 Renovação (90/60/30 e vencido)
@@ -369,10 +430,10 @@ Todos ao lado do app (mesma pasta de `main.py`):
 | Arquivo | Conteúdo |
 |---|---|
 | `tracking_config.json` | Configurações (e último Excel) |
-| `tracking.db` | SQLite: histórico de envios, Risk Assessment, certificados recebidos |
+| `tracking.db` | SQLite: histórico de envios, Risk Assessment, certificados recebidos (local configurável em Settings → Shared Database) |
 | `tracking_app_log.txt` | Log da interface |
 | `tracking_auto_log.txt` | Log do modo `--auto` |
-| `<pasta de certificados>/<Fornecedor> - <RBSNO>/` | Arquivos de certificado e anexos |
+| `<pasta de certificados>/<Fornecedor> - <RBSNO>/` | Certificados (`ISO 9001 - …`, `IATF 16949 - …`, `ISO 14001 - …`) e subpasta `Evidence` |
 
 Arquivos antigos `renovacert_*` são renomeados automaticamente na primeira
 execução (config, banco, logs), preservando o histórico.
@@ -410,7 +471,17 @@ Excel, conta como novo ciclo. Se o `tracking.db` foi apagado/trocado, o
 histórico recomeça.
 
 **Quero parar de cobrar um fornecedor.** Arquivo recebido → *Register Received
-Certificate*. Sem certificado → *Risk Assessment*.
+Certificate* (ou anexe em *Certificate* no Risk Assessment). Sem certificado →
+*Risk Assessment* (em aberto).
+
+**Anexei o certificado mas o fornecedor continua vermelho/cinza.** O app
+reconhece pelo **nome** do arquivo (`ISO 9001 - …`, `IATF 16949 - …`,
+`ISO 14001 - …`) dentro da pasta do fornecedor, configurada em Settings →
+Certificate Files. Clique em **Load & Analyze** de novo. Arquivos antigos com
+outro nome são renomeados ao abrir o registro no Risk Assessment e clicar em Save.
+
+**Apaguei o arquivo e o fornecedor continua verde.** Clique em **Load & Analyze**:
+registros sem arquivo na pasta são removidos na análise.
 
 ---
 
@@ -514,8 +585,8 @@ templates.py            Corpos HTML dos e-mails (pt-br)
 email_sender.py         Envio via Outlook COM (BCC, remetente)
 history_db.py           Histórico de envios (SQLite)
 received_db.py          Certificados recebidos ainda não subidos (SQLite)
-risk_db.py              Lista de Risk Assessment (SQLite)
-cert_files.py           Pastas por fornecedor e cópia de arquivos
+risk_db.py              Risk Assessment com histórico, certificados e evidências (SQLite)
+cert_files.py           Pastas por fornecedor, renomeação padrão e leitura dos arquivos
 notifications.py        Notificações do Windows (Plyer, opcional)
 requirements.txt
 ui/
@@ -570,8 +641,11 @@ colunas reais ao erro. `resolve_email(emails, rbsno, pmd)` tenta RBSNO e depois 
 - Constantes: `CERT_TYPES` (abas), `CERT_TYPE_LABELS_PT`, `CERT_ISO_TAG`,
   `CERT_LABEL_EN`, `COMBINED_FIELD = "combined_cert"`, `BLUE`.
 - `quality_valid(sup)` / `env_valid(sup)`.
-- `load_received(rdb, suppliers)`: lê os pares `(rbsno, grupo)` suspensos e
-  **encerra** os que o Excel já mostra como válidos.
+- `cert_key(certificado)` → `"iso" | "iatf" | "env"`.
+- `load_received(rdb, suppliers, folder="")`: apaga registros sem arquivo
+  (`prune_missing_files`), encerra os que o Excel já mostra válidos e soma os
+  arquivos encontrados nas pastas (`cert_files.scan_keys`). Devolve o conjunto
+  de pares `(rbsno, "iso"|"iatf"|"env")`.
 - `build_rows(sup, email, hdb, overdue_days, received=(), risk=())` → lista de
   3 dicts (um por aba). Chaves:
 
@@ -579,7 +653,7 @@ colunas reais ao erro. `resolve_email(emails, rbsno, pmd)` tenta RBSNO e depois 
 |---|---|
 | `tab` | aba onde aparece: `iso_expiry`, `env_expiry`, `iatf_expiry` |
 | `field` | chave usada em histórico/envio (`iso_expiry`, `env_expiry`, `iatf_expiry` ou `combined_cert`) |
-| `kind` | `normal`, `blue_iso`, `blue_iatf` |
+| `kind` | `normal`, `blue_iso`, `blue_iatf`, `received` |
 | `expiry`, `tier`, `days_left` | situação (`tier == BLUE` nas linhas azuis) |
 | `pending` | **será enviado agora** |
 | `shown_pending` | só exibição (linha espelho da aba IATF) |
@@ -592,9 +666,12 @@ certificado está ativo, ou se está válido e o outro também não está ativo;
 se o outro está válido, é **azul**; se nenhum é válido, é a linha **combinada**
 (tier `EXPIRED` ou `NO_DATE`), cujo `pending` só existe na aba ISO — a aba IATF
 fica com `pending=False` e `shown_pending` espelhando.
-Depois, para todas as linhas com `notify`: se o fornecedor está em `received`
-(`(rbsno, "quality"|"env")`) → `received=True`; senão, se está em `risk`
-(grupo quality) → `risk=True`. Em ambos, `pending=False`.
+Certificado **recebido** (`(rbsno, "iso"|"iatf"|"env")` em `received`): antes
+do algoritmo, o tier daquele certificado é anulado (`None` = Ativo) e ele conta
+como válido — assim a outra aba vira azul. A linha do próprio certificado vira
+`kind="received"` (`received=True`, `pending=False`). Para as demais linhas com
+`notify` de ISO/IATF: se o fornecedor está em `risk` (apenas Risk Assessment
+**não concluído**) → `risk=True`, `pending=False`.
 
 ### `templates.py`
 `build_email_body(name, cert_label, expiry_str, days_left, tier, company, language)`.
@@ -610,18 +687,25 @@ configurada no Outlook) ou `SentOnBehalfOfName` (fallback).
 `HistoryDB`: `get_last_send`, `log_send`, `history(limit)`, `count()`.
 
 ### `received_db.py`
-`ReceivedDB`: `add`, `suppressed_groups()`, `delete_group`, `supplier_count()`;
-`group_of(certificado)` → `"env"` se contém "14001"/"Environ", senão `"quality"`.
+`ReceivedDB`: `add` (substitui registro com o mesmo `saved_path`),
+`prune_missing_files()`, `all_certs()`, `delete_cert`, `suppressed_groups()`,
+`delete_group`, `supplier_count()`; `group_of(certificado)`.
 
 ### `risk_db.py`
 `RiskDB`: `all`, `add`, `update`, `delete`, `keys()` (RBSNOs **e** nomes em
-minúsculo). Migração automática da coluna `files` (`ALTER TABLE`) para bancos
-antigos. Os anexos são guardados como caminhos separados por `|`.
+minúsculo, só de registros **não** `Completed`). Migração automática das colunas
+`files` e `evidence` (`ALTER TABLE`). `files` = certificados; `evidence` =
+arquivos e links; ambos como texto separado por `|` (links começam com
+`http://`/`https://`). Cada Add cria um registro novo (histórico preservado).
 
 ### `cert_files.py`
-`supplier_folder(base, name, rbsno, create)`, `save_file(base, name, rbsno, src)`
-(copia com `shutil.copy2`, sem sobrescrever, sanitiza caracteres inválidos de
-nomes de pasta do Windows).
+`supplier_folder`, `file_label(cert)` (`ISO 9001`/`IATF 16949`/`ISO 14001`),
+`save_file(base, name, rbsno, src, certificado)` (copia e renomeia para
+`<Certificado> - <Fornecedor> - <RBSNO>.<ext>`, **sobrescrevendo** o de mesmo
+nome), `scan_keys` (lê os prefixos na pasta), `standardize_existing` (renomeia
+arquivo antigo para o padrão) e `save_extra` (mantém o nome original, nunca
+sobrescreve; usado nas evidências, subpasta `Evidence`). Sanitiza caracteres
+inválidos do Windows.
 
 ### `notifications.py`
 `notify(title, message, log=None)`: tenta `plyer.notification`; qualquer exceção
@@ -640,7 +724,7 @@ SQLite único (`tracking.db`):
 notifications(id, rbsno, pmd, supplier_name, cert_type, expiry_date, tier,
               sent_date, recipient_email)
 risk_assessment(id, rbsno, pmd, supplier_name, certificate, status,
-                added_date, notes, files)
+                added_date, notes, files, evidence)
 received_certs(id, rbsno, pmd, supplier_name, certificate, grp, file_name,
                saved_path, received_date)
 ```
@@ -656,7 +740,7 @@ received_certs(id, rbsno, pmd, supplier_name, certificate, grp, file_name,
 1. `_load_and_analyze` valida o arquivo e dispara `_analyze_worker` em thread.
 2. Worker: define `WARNING_THRESHOLDS`, `read_suppliers(..., country_filter="BR")`,
    `load_emails` (se o Access estiver configurado; avisos vão ao Log),
-   `load_received`, `RiskDB.keys()`, e `build_rows` por fornecedor.
+   `load_received` (com a pasta de certificados), `RiskDB.keys()`, e `build_rows` por fornecedor.
 3. Emite `analysis_finished(suppliers, rows)` → `_on_analysis_finished` (thread
    da UI) preenche tabelas, cartões, contador, gráficos e Follow-up.
 
@@ -742,9 +826,12 @@ Dicas:
 - **Reenvio de "Missing date"** segue o mesmo intervalo dos vencidos (15 dias).
 - **Certificado expirando + outro ativo → sem aviso** (decisão de negócio:
   um repõe o outro).
-- **Risk Assessment pausa a cobrança em qualquer status** (inclusive Completed).
+- **Risk Assessment em aberto pausa a cobrança; Completed não** (fica como
+  histórico).
+- **Certificado recebido = Ativo enquanto o arquivo existir:** o app não lê a
+  data de validade do arquivo; a identificação é pelo **nome** do arquivo.
 - **Missing date (Follow-up)** é calculado por **subtração de contagens**
-  (`missing_total − risk − recebidos`), não por interseção de fornecedores; se
+  (`missing_total − risk`, onde `missing_total` já exclui os recebidos), não por interseção de fornecedores; se
   um fornecedor em Risk Assessment não estiver sem data, o número ainda cai.
 - **Sem confirmação de entrega/resposta:** o app não lê a caixa de entrada; o
   "recebido" é registrado manualmente.
@@ -763,6 +850,7 @@ Dicas:
   `renovacert_*` → `tracking_*` (`tracking.db`), migração automática.
 - Reescrita Tkinter → **PySide6**, interface em inglês.
 - Sub-abas por certificado; cartões dinâmicos; ordenação por coluna.
+- Assunto do e-mail termina com o **RBSNO** (antes, nome do fornecedor); **Shared Database**: local do `tracking.db` configurável (banco único em rede para vários PCs).
 - Filtro **BR**; assunto com tag de certificado; coluna **Reminder**;
   "Missing date".
 - **Send History** com total de envios e **Time Saved** (5 min/envio).
@@ -774,3 +862,11 @@ Dicas:
   anexos); **Register Received Certificate**; **Reports** (Quality,
   Environmental, Follow-up).
 - Último Excel lembrado; ordenação alfabética de Status; Status centralizado.
+- **Time Saved** movido para Reports; **campo de pesquisa** no Panel
+  (Supplier/RBSNO/PMD); fundo dos rótulos do Settings corrigido.
+- **Certificado recebido conta como Ativo** (por certificado, com azul cruzado
+  ISO/IATF e Ambiental independente); arquivos renomeados no padrão
+  `<Certificado> - <Fornecedor> - <RBSNO>`; conferência da pasta a cada análise
+  (arquivo apagado remove o registro); mesmo certificado substitui o anterior.
+- **Risk Assessment:** campos **Certificate** e **Evidence** (arquivos e links),
+  exclusão física só ao salvar, histórico preservado e Completed não pausa mais.

@@ -23,7 +23,7 @@ def group_of(certificate):
 
 class ReceivedDB:
     def __init__(self, path):
-        self.conn = sqlite3.connect(path)
+        self.conn = sqlite3.connect(path, timeout=30)  # timeout: vários PCs no mesmo arquivo
         self.conn.execute(SCHEMA)
         self.conn.commit()
 

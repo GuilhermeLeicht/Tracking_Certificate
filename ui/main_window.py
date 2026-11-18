@@ -40,8 +40,8 @@ except Exception:
     OUTLOOK_AVAILABLE = False
 
 
-LOG_FILE_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tracking_app_log.txt")
+from config import APP_DIR
+LOG_FILE_PATH = os.path.join(APP_DIR, "tracking_app_log.txt")
 
 TABLE_HEADERS = ["Supplier", "RBSNO", "PMD", "Expiry Date", "Status", "Reminder", "E-mail"]
 CENTERED_COLUMNS = (1, 2, 3, 4, 5)  # RBSNO, PMD, Expiry Date, Status, Reminder
@@ -228,6 +228,7 @@ class EmailPreviewDialog(QDialog):
 
         cert_label = CERT_TYPE_LABELS_PT[field]
         sample_supplier = "Fornecedor Exemplo Ltda"
+        sample_rbsno = "9092345"
 
         company_name = self.settings_fields["company_name"].text().strip() or "Your Company"
         subject_prefix = self.settings_fields["default_subject_pt"].text().strip()
@@ -241,7 +242,7 @@ class EmailPreviewDialog(QDialog):
             sample_supplier, cert_label, expiry_str, days_left, tier, company_name,
             language="pt-br")
 
-        subject = f"{subject_prefix} - {iso_tag} - {sample_supplier}"
+        subject = f"{subject_prefix} - {iso_tag} - {sample_rbsno}"
         self.subject_label.setText(f"Subject: {subject}")
         self.browser.setHtml(body)
 
@@ -627,6 +628,21 @@ class MainWindow(QMainWindow):
                              None)
         layout.addWidget(group_files)
 
+        # --- Banco de dados compartilhado -------------------------------------------------
+        group_db = QGroupBox("Shared Database")
+        v2c = QVBoxLayout(group_db)
+        v2c.setSpacing(10)
+        hint_db = QLabel(
+            "Location of the tracking.db file (send history, Risk Assessment, received "
+            "certificates). To share the same data between several PCs, point every PC to the "
+            "same file on a network folder. If the file does not exist yet, it is created there. "
+            "This setting is stored per PC.")
+        hint_db.setObjectName("SectionHint")
+        hint_db.setWordWrap(True)
+        v2c.addWidget(hint_db)
+        self._add_file_field(v2c, "history_db_path", "Database file (tracking.db):", "DB_SAVE")
+        layout.addWidget(group_db)
+
         # --- Regras de notificação ----------------------------------------------------
         group_rules = QGroupBox("Notification Rules")
         v3 = QVBoxLayout(group_rules)
@@ -739,7 +755,11 @@ class MainWindow(QMainWindow):
         self.settings_fields[key] = edit
 
     def _browse_file(self, line_edit, file_filter):
-        if file_filter is None:  # modo pasta
+        if file_filter == "DB_SAVE":  # escolhe um .db existente OU define onde será criado
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Select or create the tracking.db file", line_edit.text(),
+                "SQLite database (*.db)", options=QFileDialog.DontConfirmOverwrite)
+        elif file_filter is None:  # modo pasta
             path = QFileDialog.getExistingDirectory(self, "Select folder")
         else:
             path, _ = QFileDialog.getOpenFileName(self, "Select file", "", file_filter)
@@ -790,13 +810,39 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Settings", "Invalid values in the day fields.")
             return
 
+        # banco compartilhado: validar a pasta antes de aceitar
+        db_path = self.settings_fields["history_db_path"].text().strip()
+        if not db_path:
+            db_path = cfgmod.DEFAULT_CONFIG["history_db_path"]
+            self.settings_fields["history_db_path"].setText(db_path)
+        if not db_path.lower().endswith(".db"):
+            db_path += ".db"
+            self.settings_fields["history_db_path"].setText(db_path)
+        db_dir = os.path.dirname(os.path.abspath(db_path))
+        if not os.path.isdir(db_dir):
+            QMessageBox.critical(self, "Settings", f"The database folder does not exist or is not reachable:\n{db_dir}")
+            return
+        old_db = self.cfg.get("history_db_path")
+
         for key, edit in self.settings_fields.items():
             self.cfg[key] = edit.text().strip()
 
         self.cfg["reminder_days"] = days
         self.cfg["overdue_resend_interval_days"] = self.spin_overdue.value()
 
+        try:  # cria/valida o banco no novo local (cria as tabelas se for novo)
+            for cls in (HistoryDB, RiskDB, ReceivedDB):
+                cls(self.cfg["history_db_path"]).close()
+        except Exception as exc:
+            self.cfg["history_db_path"] = old_db or cfgmod.DEFAULT_CONFIG["history_db_path"]
+            self.settings_fields["history_db_path"].setText(self.cfg["history_db_path"])
+            QMessageBox.critical(self, "Settings", f"Could not open/create the database file:\n{exc}")
+            return
         cfgmod.save_config(self.cfg)
+        if old_db != self.cfg["history_db_path"]:
+            self._log(f"Database location changed to: {self.cfg['history_db_path']}")
+            self._refresh_history()
+            self.risk_tab.refresh()
         self._log("Settings saved.")
         QMessageBox.information(self, "Settings", "Settings saved successfully.")
 
@@ -1140,7 +1186,7 @@ class MainWindow(QMainWindow):
                 body = templates.build_email_body(
                     item["name"], cert_label, expiry_str, item["days_left"],
                     item["tier"], self.cfg["company_name"], language="pt-br")
-                subject = f"{subject_prefix} - {iso_tag} - {item['name']}"
+                subject = f"{subject_prefix} - {iso_tag} - {item['rbsno']}"
                 email_sender.send_email(item["email"], self.cfg.get("bcc_email", ""), subject, body,
                                         sender=self.cfg.get("sender_email", ""))
                 hdb.log_send(item["rbsno"], item["pmd"], item["name"], item["field"],

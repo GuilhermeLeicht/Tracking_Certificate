@@ -33,7 +33,7 @@ from received_db import ReceivedDB
 from supplier_rows import load_received, build_rows, CERT_TYPE_LABELS_PT, CERT_ISO_TAG
 from history_db import HistoryDB
 
-LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tracking_auto_log.txt")
+LOG_PATH = os.path.join(__import__("config").APP_DIR, "tracking_auto_log.txt")
 
 def _log(msg):
     line = f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}"
@@ -123,7 +123,7 @@ def run_automatic():
                     sup.name, CERT_TYPE_LABELS_PT[field], expiry_str,
                     item["days_left"], item["tier"], cfg["company_name"], language="pt-br")
                 prefix = cfg["default_subject_missing_pt"] if item["tier"] == NO_DATE else subject_prefix
-                subject = f"{prefix} - {CERT_ISO_TAG[field]} - {sup.name}"
+                subject = f"{prefix} - {CERT_ISO_TAG[field]} - {sup.rbsno}"
                 email_sender.send_email(email, cfg.get("bcc_email", ""), subject, body,
                                         sender=cfg.get("sender_email", ""))
                 hdb.log_send(sup.rbsno, sup.pmd, sup.name, field, expiry, item["tier"], email)

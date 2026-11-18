@@ -26,7 +26,7 @@ COLUMNS = "id, rbsno, pmd, supplier_name, certificate, status, added_date, notes
 
 class RiskDB:
     def __init__(self, path):
-        self.conn = sqlite3.connect(path)
+        self.conn = sqlite3.connect(path, timeout=30)  # timeout: vários PCs no mesmo arquivo
         self.conn.execute(SCHEMA)
         cols = [r[1] for r in self.conn.execute("PRAGMA table_info(risk_assessment)")]
         if "files" not in cols:  # migração de bancos criados antes dos anexos
